@@ -1,10 +1,12 @@
 import tensorflow_datasets as tfds
-import numpy as np
+# import numpy as np
+from tensorflow.data.experimental import AUTOTUNE
 import jax
-from jax import jit, vmap, pmap
+from jax import jit, vmap  # , pmap
 import jax.numpy as jnp
 import util as u
 import logging
+from functools import partial
 
 # see notebook on derivation of these from training sample
 
@@ -22,7 +24,26 @@ CHANNEL_STDS = jnp.array([242.14961, 324.46646, 386.99976, 587.74664,
                           1231.3727])
 
 
-def tf_dataset(split, force_small_data=False):
+@partial(vmap, in_axes=(1, 0), out_axes=1)
+def _clip_per_channel(x, a_max):
+    return jnp.clip(x, a_min=0, a_max=a_max)
+
+
+@partial(vmap, in_axes=(1, 0, 0), out_axes=1)
+def _standardise_per_channel(x, mean, std):
+    return (x - mean) / std
+
+
+@jit
+def clip_and_standardise(x):
+    orig_shape = x.shape
+    x = x.reshape(-1, 13)
+    x = _clip_per_channel(x, CHANNEL_P999S)
+    x = _standardise_per_channel(x, CHANNEL_MEANS, CHANNEL_STDS)
+    return x.reshape(orig_shape)
+
+
+def dataset(split, batch_size, shuffle_seed=123):
 
     # # choose split that divides evenly across 4 hosts. when force_small_data
     # # is set (e.g. local dev smoke test) just use 10 examples for everything.
@@ -42,108 +63,35 @@ def tf_dataset(split, force_small_data=False):
     # logging.info("for host %s (training=%s) split is %s",
     #              jax.host_id(), training, split)
 
-    split = {'train': 'train[:70%]',
+    split = {'sample': 'train[:1%]',
+             'train': 'train[:70%]',
              'tune_1': 'train[70%:80%]',
              'tune_2': 'train[80%:90%]',
              'test': 'train[90%:]'}[split]
 
-    # load images and labels as single batch
     dataset = tfds.load('eurosat/all', split=split, as_supervised=True)
-    for tf_imgs, tf_labels in dataset.batch(100_000):
-        break
 
-    return tf_imgs, tf_labels
+    is_training = split in ['sample', 'train']
+    if is_training:
+        dataset = (dataset.map(_augment, num_parallel_calls=AUTOTUNE)
+                          .shuffle(1024, seed=shuffle_seed))
 
+    dataset = dataset.batch(batch_size)
 
-@partial(vmap, in_axes=(1, 0), out_axes=1)
-def clip_per_channel(x, a_max):
-    return jnp.clip(x, a_min=0, a_max=a_max)
-
-
-@partial(vmap, in_axes=(1, 0, 0), out_axes=1)
-def standardise_per_channel(x, mean, std):
-    return (x - mean) / std
+    for imgs, labels in dataset:
+        imgs, labels = jnp.array(imgs), jnp.array(labels)
+        imgs = clip_and_standardise(imgs)
+        yield imgs, labels
 
 
-@jit
-def clip_and_standardise(x):
-    orig_shape = x.shape
-    x = x.reshape(-1, 13)
-    x = clip_per_channel(x, CHANNEL_P999S)
-    x = standardise_per_channel(x, CHANNEL_MEANS, CHANNEL_STDS)
-    return x.reshape(orig_shape)
+# def shard_dataset(imgs, labels):
+#     # clip lens to ensure can be reshaped to leading 8
+#     n = (len(imgs) // 8) * 8
+#     imgs, labels = imgs[:n], labels[:n]
 
+#     # resize to leading dim of 8
+#     imgs = imgs.reshape(8, n // 8, 64, 64, 13)
+#     labels = labels.reshape(8, n // 8)
 
-def preprocess_and_shard_dataset(tfe_imgs, tfe_labels):
-    # clip lens to ensure can be reshaped to leading 8
-    imgs, labels = np.array(tfe_imgs), np.array(tfe_labels)
-    del tfe_imgs  # transistent OOM ??
-    del tfe_labels
-    n = (len(imgs) // 8) * 8
-    imgs, labels = imgs[:n], labels[:n]
-
-    # clip and standardise values per channel
-    imgs = clip_and_standardise(imgs)
-
-    # resize to leading dim of 8
-    imgs = imgs.reshape(8, n // 8, 64, 64, 13)
-    labels = labels.reshape(8, n // 8)
-
-    # return sharded
-    return u.shard(imgs), u.shard(labels)
-
-
-def rot90(m, k=1):
-    # jax.numpy.rot90 uses conditionals on k which means we
-    # can't vmap over them. but if we swap them to jnp.wheres
-    # we can!
-    # https://jax.readthedocs.io/en/latest/_modules/jax/_src/numpy/lax_numpy.html#rot90
-    ax1, ax2 = 0, 1
-    k = k % 4
-
-    def not_0():
-        return jnp.where(k == 2,
-                         jnp.flip(jnp.flip(m, ax1), ax2),
-                         not_0_or_2())
-
-    def not_0_or_2():
-        perm = list(range(m.ndim))
-        perm[ax1], perm[ax2] = perm[ax2], perm[ax1]
-        return jnp.where(k == 1,
-                         jnp.transpose(jnp.flip(m, ax2), perm),
-                         jnp.flip(jnp.transpose(m, perm), ax2))
-
-    return jnp.where(k == 0, m, not_0())
-
-
-def random_flip(m, k):
-    return jnp.where(k == 0, m, jnp.fliplr(m))
-
-
-def augment(img, rot, flip):  # (H,W,C) -> (H,W,C)
-    img = rot90(img, rot)
-    img = random_flip(img, flip)
-    return img
-
-
-def all_combos_augment(img):  # (H,W,C) -> (8,H,W,C)
-    rots = np.array([0, 1, 2, 3, 0, 1, 2, 3])
-    flips = np.array([0, 0, 0, 0, 1, 1, 1, 1])
-    v_augment = vmap(augment, in_axes=(None, 0, 0))
-    return v_augment(img, rots, flips)
-
-
-@pmap
-def batched_all_combos_augment(imgs):
-    v_all_combos_augment = vmap(all_combos_augment)
-    imgs = v_all_combos_augment(imgs)    # (B,H,W,C) -> (B,8,H,W,C)
-    return imgs.reshape(-1, 64, 64, 13)  # (8B,H,W,C)
-
-
-if __name__ == '__main__':
-    tf_imgs, tf_labels = tf_dataset('test')
-
-    imgs, labels = preprocess_and_shard_dataset(tf_imgs, tf_labels)
-
-    augmented_train_imgs = batched_all_combos_augment(imgs)
-    augmented_train_labels = pmap(lambda v: jnp.repeat(v, 8))(labels)
+#     # return sharded
+#     return u.shard(imgs), u.shard(labels)
