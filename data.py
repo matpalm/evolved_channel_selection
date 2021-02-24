@@ -22,33 +22,37 @@ CHANNEL_STDS = jnp.array([242.14961, 324.46646, 386.99976, 587.74664,
                           1231.3727])
 
 
-def dataset(training, force_small_data=False):
+def tf_dataset(split, force_small_data=False):
 
-    # choose split that divides evenly across 4 hosts
-    # when force_small_data is set (e.g. local dev smoke test)
-    # just use 10 examples for everything
-    h = jax.host_id()
-    if training:  # train[:80%]
-        if force_small_data:
-            per_host_egs = 10
-        else:
-            per_host_egs = 5400
-        split = f"train[{h*per_host_egs}:{(h+1)*per_host_egs}]"
-    else:  # validation; # train[80%:90%]
-        if force_small_data:
-            per_host_egs = 10
-        else:
-            per_host_egs = 675
-        split = f"train[{21600+(h*per_host_egs)}:{21600+((h+1)*per_host_egs)}]"
-    logging.info("for host %s (training=%s) split is %s",
-                 jax.host_id(), training, split)
+    # # choose split that divides evenly across 4 hosts. when force_small_data
+    # # is set (e.g. local dev smoke test) just use 10 examples for everything.
+    # h = jax.host_id()
+    # if training:  # train[:80%]
+    #     if force_small_data:
+    #         per_host_egs = 10
+    #     else:
+    #         per_host_egs = 5400
+    #     split = f"train[{h*per_host_egs}:{(h+1)*per_host_egs}]"
+    # else:  # validation; # train[80%:90%]
+    #     if force_small_data:
+    #         per_host_egs = 10
+    #     else:
+    #         per_host_egs = 675
+    #     split = f"train[{21600+(h*per_host_egs)}:{21600+((h+1)*per_host_egs)}]"
+    # logging.info("for host %s (training=%s) split is %s",
+    #              jax.host_id(), training, split)
+
+    split = {'train': 'train[:70%]',
+             'tune_1': 'train[70%:80%]',
+             'tune_2': 'train[80%:90%]',
+             'test': 'train[90%:]'}[split]
 
     # load images and labels as single batch
     dataset = tfds.load('eurosat/all', split=split, as_supervised=True)
-    for tfe_imgs, tfe_labels in dataset.batch(100_000):
+    for tf_imgs, tf_labels in dataset.batch(100_000):
         break
 
-    return tfe_imgs, tfe_labels
+    return tf_imgs, tf_labels
 
 
 @partial(vmap, in_axes=(1, 0), out_axes=1)
@@ -71,14 +75,14 @@ def clip_and_standardise(x):
 
 
 def preprocess_and_shard_dataset(tfe_imgs, tfe_labels):
-    # clip size to ensure can be reshaped to leading 8
+    # clip lens to ensure can be reshaped to leading 8
     imgs, labels = np.array(tfe_imgs), np.array(tfe_labels)
     del tfe_imgs  # transistent OOM ??
     del tfe_labels
     n = (len(imgs) // 8) * 8
     imgs, labels = imgs[:n], labels[:n]
 
-    # clip and standardise
+    # clip and standardise values per channel
     imgs = clip_and_standardise(imgs)
 
     # resize to leading dim of 8
@@ -134,3 +138,12 @@ def batched_all_combos_augment(imgs):
     v_all_combos_augment = vmap(all_combos_augment)
     imgs = v_all_combos_augment(imgs)    # (B,H,W,C) -> (B,8,H,W,C)
     return imgs.reshape(-1, 64, 64, 13)  # (8B,H,W,C)
+
+
+if __name__ == '__main__':
+    tf_imgs, tf_labels = tf_dataset('test')
+
+    imgs, labels = preprocess_and_shard_dataset(tf_imgs, tf_labels)
+
+    augmented_train_imgs = batched_all_combos_augment(imgs)
+    augmented_train_labels = pmap(lambda v: jnp.repeat(v, 8))(labels)
