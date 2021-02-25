@@ -24,8 +24,9 @@ def train(opts):
     model = models.construct_single_trunk_model()
 
     pod_rng, init_key = jax.random.split(pod_rng)
-    representative_input = jnp.zeros((1, 64, 64, 13))
+    representative_input = jnp.zeros((1, opts.input_size, opts.input_size, 13))
     params = model.init(init_key, representative_input)
+    #logging.debug("params %s", u.shapes_of(params))
 
     opt = optax.adam(opts.learning_rate)
     opt_state = opt.init(params)
@@ -51,7 +52,9 @@ def train(opts):
     for epoch in range(opts.epochs):
 
         # make one pass through training set
-        train_dataset = d.dataset(split='train', batch_size=opts.batch_size)
+        train_dataset = d.dataset(split='train',
+                                  batch_size=opts.batch_size,
+                                  input_size=opts.input_size)
         for x, y_true in train_dataset:
             params, opt_state = update(params, opt_state, x, y_true)
 
@@ -59,7 +62,9 @@ def train(opts):
         mean_last_batch_loss = mean_cross_entropy(params, x, y_true).mean()
 
         # calculate validation loss
-        validate_dataset = d.dataset(split='tune_1', batch_size=opts.batch_size)
+        validate_dataset = d.dataset(split='tune_1',
+                                     batch_size=opts.batch_size,
+                                     input_size=opts.input_size)
         accuracy = u.accuracy(model, params, validate_dataset)
         if accuracy > best_validation_accuracy:
             best_validation_accuracy = accuracy
@@ -84,7 +89,10 @@ if __name__ == '__main__':
     parser.add_argument('--learning-rate', type=float, default=1e-3)
     parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=2)
+    parser.add_argument('--input-size', type=int, default=64)
     opts = parser.parse_args()
     print(opts, file=sys.stderr)
+
+    assert opts.input_size in [64, 32, 16, 8]
 
     train(opts)
