@@ -1,3 +1,8 @@
+
+import logging
+logging.basicConfig(format='%(asctime)s %(message)s',
+                    level=logging.INFO)
+
 import jax
 from jax import jit, grad
 import jax.numpy as jnp
@@ -10,6 +15,10 @@ import util as u
 
 
 def train(opts):
+
+    run = u.DTS()
+    logging.info("run %s", run)
+
     host_rng = jax.random.PRNGKey(opts.seed ^ jax.host_id())
     pod_rng = jax.random.PRNGKey(opts.seed - 1)
 
@@ -38,6 +47,8 @@ def train(opts):
         params = optax.apply_updates(params, updates)
         return params, opt_state
 
+    best_validation_accuracy = 0
+    best_validation_epoch = None
     for epoch in range(opts.epochs):
 
         # make one pass through training set
@@ -51,9 +62,17 @@ def train(opts):
         # calculate validation loss
         validate_dataset = d.dataset(split='tune_1', batch_size=opts.batch_size)
         accuracy = u.accuracy(model, params, validate_dataset)
+        if accuracy > best_validation_accuracy:
+            best_validation_accuracy = accuracy
+            best_validation_epoch = epoch
+            u.save_params(run, epoch, params)
 
-        print("epoch", epoch, "mean last batch loss",
-              mean_last_batch_loss, "validate accuracy", accuracy)
+        logging.info("epoch %d mean_last_batch_loss %0.4f"
+                     " validate accuracy %0.3f", epoch, mean_last_batch_loss,
+                     accuracy)
+
+    logging.info("best_validation_accuracy %0.3f best_validation_epoch %d",
+                 best_validation_accuracy, best_validation_epoch)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,8 @@ import jax.numpy as jnp
 from jax import pmap, host_id, jit
 from jax.tree_util import tree_map
 import datetime
+import os
+import pickle
 
 
 def shard(x):
@@ -24,6 +26,15 @@ def DTS():
     return datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
 
+def ensure_dir_exists(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+
+def ensure_dir_exists_for_file(fname):
+    ensure_dir_exists(os.path.dirname(fname))
+
+
 def primary_host():
     return host_id() == 0
 
@@ -44,3 +55,17 @@ def accuracy(model, params, dataset):
 
     accuracy = float(num_correct / num_total)
     return accuracy
+
+
+def save_params(run, epoch, params):
+    fname = f"params/{run}/{epoch}.pkl"
+    ensure_dir_exists_for_file(fname)
+    with open(fname, 'wb') as f:
+        pickle.dump(params, f)
+
+
+def load_params(run, epoch):
+    fname = f"params/{run}/{epoch}.pkl"
+    with open(fname, 'rb') as f:
+        params = pickle.load(f)
+    return params
