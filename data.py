@@ -89,21 +89,20 @@ def dataset(split, batch_size, channels_to_zero_out=None, input_size=64):
 
     dataset = dataset.batch(batch_size)
 
-    @jit
     def preprocess(x):
         if input_size != 64:
-            resize = partial(jax.image.resize,
-                             shape=(input_size, input_size, 13),
-                             method='linear', antialias=True)
-            x = vmap(resize)(x)
+            x = jax.image.resize(x, shape=(input_size, input_size, 13),
+                                 method='linear', antialias=True)
 
         x = clip_and_standardise(x)
 
         if channels_to_zero_out is not None:
-            indexes = jax.ops.index[:, :, :, channels_to_zero_out]
+            indexes = jax.ops.index[:, :, channels_to_zero_out]
             x = jax.ops.index_update(x, indexes, 0)
 
         return x
+
+    preprocess = jit(vmap(preprocess))
 
     for x, labels in dataset:
         x, labels = jnp.array(x), jnp.array(labels)
