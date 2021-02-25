@@ -54,7 +54,7 @@ def _augment(x, y):
     return x, y
 
 
-def dataset(split, batch_size, shuffle_seed=123):
+def dataset(split, batch_size, channels_to_zero_out=None, shuffle_seed=123):
 
     # # choose split that divides evenly across 4 hosts. when force_small_data
     # # is set (e.g. local dev smoke test) just use 10 examples for everything.
@@ -90,10 +90,13 @@ def dataset(split, batch_size, shuffle_seed=123):
 
     dataset = dataset.batch(batch_size)
 
-    for imgs, labels in dataset:
-        imgs, labels = jnp.array(imgs), jnp.array(labels)
-        imgs = clip_and_standardise(imgs)
-        yield imgs, labels
+    for x, labels in dataset:
+        x, labels = jnp.array(x), jnp.array(labels)
+        x = clip_and_standardise(x)
+        if channels_to_zero_out is not None:
+            indexes = jax.ops.index[:, :, :, channels_to_zero_out]
+            x = jax.ops.index_update(x, indexes, 0)
+        yield x, labels
 
 
 # def shard_dataset(imgs, labels):
