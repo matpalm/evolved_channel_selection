@@ -11,12 +11,28 @@ import data as d
 import optax
 from functools import partial
 import util as u
+import wandb
 
 
 def train(opts):
 
     run = u.DTS()
     logging.info("run %s", run)
+
+    # only run wandb stuff if it's configured, and only on primary host
+    wandb_enabled = (opts.group is not None) and u.primary_host()
+    if wandb_enabled:
+        wandb.init(project='evolved_channel_selection', group=opts.group,
+                   name=run, reinit=True)
+        # save group again explicitly to work around sync bug that drops
+        # group when 'wandb off'
+        wandb.config.group = opts.group
+        wandb.config.seed = opts.seed
+        wandb.config.learning_rate = opts.learning_rate
+        wandb.config.batch_size = opts.batch_size
+        wandb.config.input_size = opts.input_size
+    else:
+        logging.info("not using wandb and/or not primary host")
 
     host_rng = jax.random.PRNGKey(opts.seed ^ jax.host_id())
     pod_rng = jax.random.PRNGKey(opts.seed - 1)
@@ -26,7 +42,7 @@ def train(opts):
     pod_rng, init_key = jax.random.split(pod_rng)
     representative_input = jnp.zeros((1, opts.input_size, opts.input_size, 13))
     params = model.init(init_key, representative_input)
-    #logging.debug("params %s", u.shapes_of(params))
+    # logging.debug("params %s", u.shapes_of(params))
 
     opt = optax.adam(opts.learning_rate)
     opt_state = opt.init(params)
@@ -71,12 +87,18 @@ def train(opts):
             best_validation_epoch = epoch
             u.save_params(run, epoch, params)
 
-        logging.info("epoch %d mean_last_batch_loss %0.4f"
-                     " validate accuracy %0.3f", epoch, mean_last_batch_loss,
-                     accuracy)
+        stats = {'loss': float(mean_last_batch_loss),
+                 'validate_accuracy': accuracy}
+        logging.info("epoch %d stats %s", epoch, stats)
+        if wandb_enabled:
+            wandb.log(stats, step=epoch)
 
-    logging.info("best_validation_accuracy %0.3f best_validation_epoch %d",
-                 best_validation_accuracy, best_validation_epoch)
+    final_stats = {'best_validation_accuracy': best_validation_accuracy,
+                   'best_validation_epoch': best_validation_epoch}
+    logging.info("final_stats %s", final_stats)
+    if wandb_enabled:
+        wandb.log(final_stats, step=epoch)
+        wandb.join()
 
 
 if __name__ == '__main__':
@@ -85,10 +107,12 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--group', type=str,
+                        help='w&b init group', default=None)
     parser.add_argument('--seed', type=int, default=123)
     parser.add_argument('--learning-rate', type=float, default=1e-3)
-    parser.add_argument('--batch-size', type=int, default=32)
-    parser.add_argument('--epochs', type=int, default=2)
+    parser.add_argument('--batch-size', type=int, default=64)
+    parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--input-size', type=int, default=64)
     opts = parser.parse_args()
     print(opts, file=sys.stderr)
