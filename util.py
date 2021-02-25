@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from jax import pmap, host_id
+from jax import pmap, host_id, jit
 from jax.tree_util import tree_map
 import datetime
 
@@ -26,3 +26,21 @@ def DTS():
 
 def primary_host():
     return host_id() == 0
+
+
+def accuracy(model, params, dataset):
+    num_correct = 0
+    num_total = 0
+
+    @jit
+    def predict(x):
+        logits = model.apply(params, x)
+        return jnp.argmax(logits, axis=-1)
+
+    for x, y_true in dataset:
+        y_pred = predict(x)
+        num_correct += jnp.sum(y_true == y_pred)
+        num_total += len(y_true)
+
+    accuracy = float(num_correct / num_total)
+    return accuracy
