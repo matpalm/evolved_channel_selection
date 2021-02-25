@@ -7,7 +7,6 @@ import jax
 from jax import jit, grad
 import jax.numpy as jnp
 import models
-import haiku as hk
 import data as d
 import optax
 from functools import partial
@@ -22,7 +21,7 @@ def train(opts):
     host_rng = jax.random.PRNGKey(opts.seed ^ jax.host_id())
     pod_rng = jax.random.PRNGKey(opts.seed - 1)
 
-    model = hk.without_apply_rng(hk.transform(models.single_trunk_model))
+    model = models.construct_single_trunk_model()
 
     pod_rng, init_key = jax.random.split(pod_rng)
     representative_input = jnp.zeros((1, 64, 64, 13))

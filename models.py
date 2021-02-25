@@ -11,7 +11,7 @@ def global_spatial_mean_pooling(x):
     return jnp.mean(x, axis=(1, 2))
 
 
-def single_trunk_model(x, dense_kernel_size=32, num_classes=10):
+def _single_trunk_model(x, dense_kernel_size=32, num_classes=10):
     # input (64, 64, 13)
     return hk.Sequential(
         [conv(32), gelu,                      # (32, 32, 32)
@@ -20,3 +20,7 @@ def single_trunk_model(x, dense_kernel_size=32, num_classes=10):
          global_spatial_mean_pooling,         # (128)
          hk.Linear(dense_kernel_size), gelu,  # (32)
          hk.Linear(num_classes)])(x)          # (10)
+
+
+def construct_single_trunk_model():
+    return hk.without_apply_rng(hk.transform(_single_trunk_model))

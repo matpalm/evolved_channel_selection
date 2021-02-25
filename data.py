@@ -1,3 +1,4 @@
+import tensorflow as tf
 import tensorflow_datasets as tfds
 # import numpy as np
 from tensorflow.data.experimental import AUTOTUNE
@@ -43,6 +44,16 @@ def clip_and_standardise(x):
     return x.reshape(orig_shape)
 
 
+@tf.autograph.experimental.do_not_convert
+def _augment(x, y):
+    # rotate 0, 90, 180 or 270 deg
+    k = tf.random.uniform([], 0, 3, dtype=tf.int32)
+    x = tf.image.rot90(x, k)
+    # flip L/R 50% time
+    x = tf.image.random_flip_left_right(x)
+    return x, y
+
+
 def dataset(split, batch_size, shuffle_seed=123):
 
     # # choose split that divides evenly across 4 hosts. when force_small_data
@@ -63,6 +74,8 @@ def dataset(split, batch_size, shuffle_seed=123):
     # logging.info("for host %s (training=%s) split is %s",
     #              jax.host_id(), training, split)
 
+    is_training = split in ['sample', 'train']
+
     split = {'sample': 'train[:1%]',
              'train': 'train[:70%]',
              'tune_1': 'train[70%:80%]',
@@ -71,7 +84,6 @@ def dataset(split, batch_size, shuffle_seed=123):
 
     dataset = tfds.load('eurosat/all', split=split, as_supervised=True)
 
-    is_training = split in ['sample', 'train']
     if is_training:
         dataset = (dataset.map(_augment, num_parallel_calls=AUTOTUNE)
                           .shuffle(1024, seed=shuffle_seed))

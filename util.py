@@ -64,8 +64,7 @@ def save_params(run, epoch, params):
         pickle.dump(params, f)
 
 
-def load_params(run, epoch):
-    fname = f"params/{run}/{epoch}.pkl"
+def load_params(fname):
     with open(fname, 'rb') as f:
         params = pickle.load(f)
     return params
