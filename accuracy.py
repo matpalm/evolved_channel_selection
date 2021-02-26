@@ -16,10 +16,16 @@ model = models.construct_single_trunk_model()
 params = u.load_params(opts.params)
 
 if opts.channel_sweep:
+    results = []
     for ch in range(13):
         dataset = data.dataset(split=opts.split, batch_size=32,
                                channels_to_zero_out=ch)
-        print("ch", ch, "accuracy %0.3f" % u.accuracy(model, params, dataset))
+        accuracy, mean_loss = u.accuracy_mean_loss(model, params, dataset)
+        results.append((ch, accuracy, mean_loss))
+    for ch, accuracy, mean_loss in sorted(results, key=lambda v: v[2]):
+        print("ch %02d accuracy %0.3f mean_loss %0.3f" %
+              (ch, accuracy, mean_loss))
 else:
     dataset = data.dataset(split=opts.split, batch_size=32)
-    print("accuracy %0.3f" % u.accuracy(model, params, dataset))
+    accuracy, mean_loss = u.accuracy_mean_loss(model, params, dataset)
+    print("accuracy %0.3f mean_loss %0.3f" % (accuracy, mean_loss))

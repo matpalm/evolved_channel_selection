@@ -47,14 +47,10 @@ def train(opts):
     opt = optax.adam(opts.learning_rate)
     opt_state = opt.init(params)
 
-    def softmax_cross_entropy(logits, labels):
-        one_hot = jax.nn.one_hot(labels, logits.shape[-1])
-        return -jnp.sum(jax.nn.log_softmax(logits) * one_hot, axis=-1)
-
     @jit
     def mean_cross_entropy(params, x, y_true):
         logits = model.apply(params, x)
-        return jnp.mean(softmax_cross_entropy(logits, y_true))
+        return jnp.mean(u.softmax_cross_entropy(logits, y_true))
 
     @jit
     def update(params, opt_state, x, y_true):
@@ -75,7 +71,7 @@ def train(opts):
             params, opt_state = update(params, opt_state, x, y_true)
 
         # just report loss for final batch (note: this is _post_ the grad update)
-        mean_last_batch_loss = mean_cross_entropy(params, x, y_true).mean()
+        mean_last_batch_loss = mean_cross_entropy(params, x, y_true)
 
         # calculate validation loss
         validate_dataset = d.dataset(split='tune_1',
@@ -99,6 +95,8 @@ def train(opts):
     if wandb_enabled:
         wandb.log(final_stats, step=epoch)
         wandb.join()
+
+    logging.info("best params params/%s/%s.pkl", run, best_validation_epoch)
 
 
 if __name__ == '__main__':

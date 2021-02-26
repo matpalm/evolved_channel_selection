@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 from jax import pmap, host_id, jit
 from jax.tree_util import tree_map
+from jax.nn import one_hot, log_softmax
 import datetime
 import os
 import pickle
@@ -39,22 +40,32 @@ def primary_host():
     return host_id() == 0
 
 
-def accuracy(model, params, dataset):
+def softmax_cross_entropy(logits, labels):
+    one_hot_labels = one_hot(labels, logits.shape[-1])
+    return -jnp.sum(log_softmax(logits) * one_hot_labels, axis=-1)
+
+
+def accuracy_mean_loss(model, params, dataset):
     num_correct = 0
+    total_loss = 0
     num_total = 0
 
     @jit
-    def predict(x):
+    def predict_with_losses(x, y_true):
         logits = model.apply(params, x)
-        return jnp.argmax(logits, axis=-1)
+        losses = softmax_cross_entropy(logits, y_true)
+        return jnp.argmax(logits, axis=-1), losses
 
     for x, y_true in dataset:
-        y_pred = predict(x)
+        y_pred, losses = predict_with_losses(x, y_true)
         num_correct += jnp.sum(y_true == y_pred)
+        total_loss += jnp.sum(losses)
         num_total += len(y_true)
 
     accuracy = float(num_correct / num_total)
-    return accuracy
+    mean_loss = float(total_loss / num_total)
+
+    return accuracy, mean_loss
 
 
 def save_params(run, epoch, params):

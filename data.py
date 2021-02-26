@@ -75,6 +75,7 @@ def dataset(split, batch_size, channels_to_zero_out=None, input_size=64):
 
     is_training = split in ['sample', 'train']
 
+    # note: train is 27,000 total
     split = {'sample': 'train[:1%]',
              'train': 'train[:70%]',
              'tune_1': 'train[70%:80%]',
