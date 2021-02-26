@@ -53,25 +53,28 @@ def _augment(x, y):
     return x, y
 
 
-def dataset(split, batch_size, channels_to_zero_out=None, input_size=64):
+def dataset(split, batch_size, channels_to_zero_out=None, input_size=64,
+            dropout_key=None):
+    """Generates pairs of x, y data.
 
-    # # choose split that divides evenly across 4 hosts. when force_small_data
-    # # is set (e.g. local dev smoke test) just use 10 examples for everything.
-    # h = jax.host_id()
-    # if training:  # train[:80%]
-    #     if force_small_data:
-    #         per_host_egs = 10
-    #     else:
-    #         per_host_egs = 5400
-    #     split = f"train[{h*per_host_egs}:{(h+1)*per_host_egs}]"
-    # else:  # validation; # train[80%:90%]
-    #     if force_small_data:
-    #         per_host_egs = 10
-    #     else:
-    #         per_host_egs = 675
-    #     split = f"train[{21600+(h*per_host_egs)}:{21600+((h+1)*per_host_egs)}]"
-    # logging.info("for host %s (training=%s) split is %s",
-    #              jax.host_id(), training, split)
+    Args:
+      split: which split to use
+      batch_size: batch size to iterate with
+      channels_to_zero_out: which channels to always zero out. if None then
+        zero out no channels. supports a single int, or an array of ints
+      input_size: spatial size to resize H, W to. 64 is a noop.
+      dropout_key: key for dropout_channels; None => no dropout
+
+    Returns:
+      yields (x, y) pairs in batch_size
+
+    Raises:
+      Exception if both dropout_key and channels_to_zero_out set.
+    """
+
+    if (dropout_key is not None) and (channels_to_zero_out is not None):
+        raise Exception("dropout_key", dropout_key, "and channels_to_zero_out",
+                        channels_to_zero_out, "can't both be set")
 
     is_training = split in ['sample', 'train']
 
@@ -90,7 +93,7 @@ def dataset(split, batch_size, channels_to_zero_out=None, input_size=64):
 
     dataset = dataset.batch(batch_size)
 
-    def preprocess(x):
+    def preprocess(x, dropout_key):
         if input_size != 64:
             x = jax.image.resize(x, shape=(input_size, input_size, 13),
                                  method='linear', antialias=True)
@@ -101,24 +104,24 @@ def dataset(split, batch_size, channels_to_zero_out=None, input_size=64):
             indexes = jax.ops.index[:, :, channels_to_zero_out]
             x = jax.ops.index_update(x, indexes, 0)
 
+        if dropout_key is not None:
+            # sample sequence of 13 0s and 1s
+            channel_mask = jax.random.randint(
+                dropout_key, minval=0, maxval=2, shape=(13,))
+            # tile that out to be a mask across the channels of x
+            mask = jnp.tile(channel_mask, (input_size, input_size, 1))
+            # apply that mask
+            x *= mask
+
         return x
 
-    preprocess = jit(vmap(preprocess))
+    # vectorise over x, but not the channel dropout
+    preprocess = jit(vmap(preprocess, in_axes=(0, None)))
 
     for x, labels in dataset:
         x, labels = jnp.array(x), jnp.array(labels)
-        x = preprocess(x)
+        key = None
+        if dropout_key is not None:
+            dropout_key, key = jax.random.split(dropout_key)
+        x = preprocess(x, key)
         yield x, labels
-
-
-# def shard_dataset(imgs, labels):
-#     # clip lens to ensure can be reshaped to leading 8
-#     n = (len(imgs) // 8) * 8
-#     imgs, labels = imgs[:n], labels[:n]
-
-#     # resize to leading dim of 8
-#     imgs = imgs.reshape(8, n // 8, 64, 64, 13)
-#     labels = labels.reshape(8, n // 8)
-
-#     # return sharded
-#     return u.shard(imgs), u.shard(labels)

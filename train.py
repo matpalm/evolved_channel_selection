@@ -31,6 +31,7 @@ def train(opts):
         wandb.config.learning_rate = opts.learning_rate
         wandb.config.batch_size = opts.batch_size
         wandb.config.input_size = opts.input_size
+        wandb.config.dropout_channels = opts.dropout_channels
     else:
         logging.info("not using wandb and/or not primary host")
 
@@ -64,9 +65,13 @@ def train(opts):
     for epoch in range(opts.epochs):
 
         # make one pass through training set
+        dropout_key = None
+        if opts.dropout_channels:
+            host_rng, dropout_key = jax.random.split(host_rng)
         train_dataset = d.dataset(split='train',
                                   batch_size=opts.batch_size,
-                                  input_size=opts.input_size)
+                                  input_size=opts.input_size,
+                                  dropout_key=dropout_key)
         for x, y_true in train_dataset:
             params, opt_state = update(params, opt_state, x, y_true)
 
@@ -77,7 +82,8 @@ def train(opts):
         validate_dataset = d.dataset(split='tune_1',
                                      batch_size=opts.batch_size,
                                      input_size=opts.input_size)
-        accuracy = u.accuracy(model, params, validate_dataset)
+        accuracy, _mean_loss = u.accuracy_mean_loss(model, params,
+                                                    validate_dataset)
         if accuracy > best_validation_accuracy:
             best_validation_accuracy = accuracy
             best_validation_epoch = epoch
@@ -112,6 +118,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--input-size', type=int, default=64)
+    parser.add_argument('--dropout-channels', action='store_true')
     opts = parser.parse_args()
     print(opts, file=sys.stderr)
 
