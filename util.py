@@ -45,14 +45,14 @@ def softmax_cross_entropy(logits, labels):
     return -jnp.sum(log_softmax(logits) * one_hot_labels, axis=-1)
 
 
-def accuracy_mean_loss(model, params, dataset):
+def accuracy_mean_loss(calc_logits_fn, dataset):
     num_correct = 0
     total_loss = 0
     num_total = 0
 
     @jit
     def predict_with_losses(x, y_true):
-        logits = model.apply(params, x)
+        logits = calc_logits_fn(x)
         losses = softmax_cross_entropy(logits, y_true)
         return jnp.argmax(logits, axis=-1), losses
 

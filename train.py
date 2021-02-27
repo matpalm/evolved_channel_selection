@@ -38,20 +38,38 @@ def train(opts):
     host_rng = jax.random.PRNGKey(opts.seed ^ jax.host_id())
     pod_rng = jax.random.PRNGKey(opts.seed - 1)
 
-    model = models.construct_single_trunk_model()
-
     pod_rng, init_key = jax.random.split(pod_rng)
     representative_input = jnp.zeros((1, opts.input_size, opts.input_size, 13))
-    params = model.init(init_key, representative_input)
+
+    if opts.model_type == 'single':
+        model = models.construct_single_trunk_model()
+        params = model.init(init_key, representative_input)
+    elif opts.model_type == 'multi-res':
+        model = models.construct_multires_model()
+        representative_channel_selection = jnp.zeros(13,)
+        params = model.init(init_key, representative_input,
+                            representative_channel_selection)
+    else:
+        raise Exception(opts.model_type)
+
     # logging.debug("params %s", u.shapes_of(params))
 
-    opt = optax.adam(opts.learning_rate)
-    opt_state = opt.init(params)
+    def calc_logits(params, x):
+        if opts.model_type == 'single':
+            return model.apply(params, x)
+        elif opts.model_type == 'multi-res':
+            channel_selection = jnp.array([0] * 13)  # just x64
+            return model.apply(params, x, channel_selection)
+        else:
+            raise Exception(opts.model_type)
 
     @jit
     def mean_cross_entropy(params, x, y_true):
-        logits = model.apply(params, x)
+        logits = calc_logits(params, x)
         return jnp.mean(u.softmax_cross_entropy(logits, y_true))
+
+    opt = optax.adam(opts.learning_rate)
+    opt_state = opt.init(params)
 
     @jit
     def update(params, opt_state, x, y_true):
@@ -79,10 +97,12 @@ def train(opts):
         mean_last_batch_loss = mean_cross_entropy(params, x, y_true)
 
         # calculate validation loss
-        validate_dataset = d.dataset(split='tune_1',
+        validate_dataset = d.dataset(split='validate',
                                      batch_size=opts.batch_size,
                                      input_size=opts.input_size)
-        accuracy, _mean_loss = u.accuracy_mean_loss(model, params,
+
+        calc_logits_fn = partial(calc_logits, params)
+        accuracy, _mean_loss = u.accuracy_mean_loss(calc_logits_fn,
                                                     validate_dataset)
         if accuracy > best_validation_accuracy:
             best_validation_accuracy = accuracy
@@ -117,11 +137,39 @@ if __name__ == '__main__':
     parser.add_argument('--learning-rate', type=float, default=1e-3)
     parser.add_argument('--batch-size', type=int, default=64)
     parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--input-size', type=int, default=64)
-    parser.add_argument('--dropout-channels', action='store_true')
+    parser.add_argument('--model-type', type=str, default='single',
+                        help="model type; 'single' or 'multi-res'")
+    parser.add_argument('--input-size', type=int, default=64,
+                        help="input size for force, only applicable to"
+                             " --model-type=single")
+    parser.add_argument('--dropout-channels', action='store_true',
+                        help="only applicable to"
+                             " --model-type=single")
+    parser.add_argument('--fixed-channel-selection', type=str, default=None,
+                        help="fixed channel selection to use. evaled as an"
+                             " int array with values 0 thru 4. only applicable"
+                             " to --model-type=multi-res")
+    parser.add_argument('--random-channel-selection', action='store_true',
+                        help="only applicable to"
+                             " --model-type=multi-res")
+
     opts = parser.parse_args()
     print(opts, file=sys.stderr)
 
     assert opts.input_size in [64, 32, 16, 8]
+    assert opts.model_type in ['single', 'multi-res']
+
+    if opts.model_type != 'single':
+        if opts.input_size != 64 or opts.dropout_channels:
+            raise Exception("--dropout-channels or input_size != 64 only"
+                            " applicable to --model-type=single")
+    if opts.model_type != 'multi-res':
+        if opts.random_channel_selection or opts.fixed_channel_selection is not None:
+            raise Exception("--random-channel-selection and"
+                            " --fixed-channel-selection only applicable to"
+                            " --model-type=multi-res")
+        if opts.random_channel_selection and opts.fixed_channel_selection is not None:
+            raise Exception("can't set both --random-channel-selection and"
+                            " --fixed-channel-selection")
 
     train(opts)
