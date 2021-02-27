@@ -15,6 +15,9 @@ parser.add_argument('--params', type=str, required=True)
 parser.add_argument('--split', type=str, required=True)
 parser.add_argument('--num-examples', type=int, required=True)
 parser.add_argument('--popn-size', type=int, required=True)
+parser.add_argument('--num-epochs', type=int, default=100)
+parser.add_argument('--proportion-new-members', type=float, default=0.1)
+parser.add_argument('--proportion-elite', type=float, default=0.0)
 opts = parser.parse_args()
 print(opts, file=sys.stderr)
 
@@ -56,12 +59,13 @@ ga = simple_ga.SimpleGA(popn_size=opts.popn_size,
                         proportion_new_members=0.2,
                         proportion_elite=0.0)
 
-for _ in range(10):
+for _ in range(opts.num_epochs):
     print("ga.members", ga.members)
     ga.calc_fitnesses()
     print("fitness", ga.raw_fitness_values)
     print("selection", ga.selection_array)
     print("popn mean fitness", np.mean(ga.raw_fitness_values))
+    print("elite", ga.get_elite_member())
     ga.breed_next_gen()
 
 ga.calc_fitnesses()

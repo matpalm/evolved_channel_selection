@@ -80,10 +80,10 @@ def dataset(split, batch_size, channels_to_zero_out=None, input_size=64,
 
     # note: train is 27,000 total
     split = {'sample': 'train[:1%]',
-             'train': 'train[:70%]',
-             'tune_1': 'train[70%:80%]',
-             'tune_2': 'train[80%:90%]',
-             'test': 'train[90%:]'}[split]
+             'train': 'train[:70%]',               # 18900
+             'validate': 'train[70%:80%]',         # 2700
+             'ga_train': 'train[80%:90%]',         # 2700
+             'ga_validate': 'train[90%:]'}[split]  # 2700
 
     dataset = tfds.load('eurosat/all', split=split, as_supervised=True)
 
