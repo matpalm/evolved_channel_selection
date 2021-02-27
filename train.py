@@ -54,26 +54,29 @@ def train(opts):
 
     # logging.debug("params %s", u.shapes_of(params))
 
-    def calc_logits(params, x):
+    def calc_logits(params, x, dropout_key):
         if opts.model_type == 'single':
+            # TODO: move channel masking from data pipeline to here to
+            #   more consistent compared to multi-res
             return model.apply(params, x)
-        elif opts.model_type == 'multi-res':
-            channel_selection = jnp.array([0] * 13)  # just x64
+        else:  # multi-res
+            # TODO: handle --fixed-channel-selection &
+            #   --random-channel-selection here
+            channel_selection = jax.random.randint(
+                dropout_key, minval=0, maxval=5, shape=(13,))
             return model.apply(params, x, channel_selection)
-        else:
-            raise Exception(opts.model_type)
 
     @jit
-    def mean_cross_entropy(params, x, y_true):
-        logits = calc_logits(params, x)
+    def mean_cross_entropy(params, x, y_true, dropout_key):
+        logits = calc_logits(params, x, dropout_key)
         return jnp.mean(u.softmax_cross_entropy(logits, y_true))
 
     opt = optax.adam(opts.learning_rate)
     opt_state = opt.init(params)
 
     @jit
-    def update(params, opt_state, x, y_true):
-        grads = grad(mean_cross_entropy)(params, x, y_true)
+    def update(params, opt_state, x, y_true, dropout_key):
+        grads = grad(mean_cross_entropy)(params, x, y_true, dropout_key)
         updates, opt_state = opt.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
         return params, opt_state
@@ -91,18 +94,27 @@ def train(opts):
                                   input_size=opts.input_size,
                                   dropout_key=dropout_key)
         for x, y_true in train_dataset:
-            params, opt_state = update(params, opt_state, x, y_true)
+            host_rng, dropout_key = jax.random.split(host_rng)
+            params, opt_state = update(
+                params, opt_state, x, y_true, dropout_key)
 
         # just report loss for final batch (note: this is _post_ the grad update)
-        mean_last_batch_loss = mean_cross_entropy(params, x, y_true)
+        mean_last_batch_loss = mean_cross_entropy(
+            params, x, y_true, dropout_key)
 
         # calculate validation loss
         validate_dataset = d.dataset(split='validate',
                                      batch_size=opts.batch_size,
                                      input_size=opts.input_size)
 
-        calc_logits_fn = partial(calc_logits, params)
-        accuracy, _mean_loss = u.accuracy_mean_loss(calc_logits_fn,
+        def calc_logits_for_validation(x):
+            if opts.model_type == 'single':
+                return model.apply(params, x)
+            else:  # multi-res
+                just_select_x64 = jnp.array([0] * 13)
+                return model.apply(params, x, just_select_x64)
+
+        accuracy, _mean_loss = u.accuracy_mean_loss(calc_logits_for_validation,
                                                     validate_dataset)
         if accuracy > best_validation_accuracy:
             best_validation_accuracy = accuracy

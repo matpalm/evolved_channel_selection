@@ -100,6 +100,11 @@ def dataset(split, batch_size, channels_to_zero_out=None, input_size=64,
 
         x = clip_and_standardise(x)
 
+        # TODO: zeroing of channels was put here in the data pipeline when
+        #   --model-type single was first written but these would make more
+        #   sense to be done in the logits calc as it's done for
+        #   --model-type multi-res
+
         if channels_to_zero_out is not None:
             indexes = jax.ops.index[:, :, channels_to_zero_out]
             x = jax.ops.index_update(x, indexes, 0)
