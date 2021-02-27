@@ -47,11 +47,9 @@ def calc_logits_fn(x):
     if opts.model_type == 'single':
         model = models.construct_single_trunk_model()
         return model.apply(params, x)
-    elif opts.model_type == 'multi-res':
+    else:  # multi-res'
         model = models.construct_multires_model()
         return model.apply(params, x, channel_selection)
-    else:
-        raise Exception()
 
 
 if opts.channel_sweep:
