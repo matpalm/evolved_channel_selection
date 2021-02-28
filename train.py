@@ -120,7 +120,8 @@ def train(opts):
         if accuracy > best_validation_accuracy:
             best_validation_accuracy = accuracy
             best_validation_epoch = epoch
-            u.save_params(run, epoch, params)
+
+        u.save_params(run, epoch, params)
 
         stats = {'loss': float(mean_last_batch_loss),
                  'validate_accuracy': accuracy}
