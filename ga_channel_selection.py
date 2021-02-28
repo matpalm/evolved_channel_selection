@@ -26,6 +26,11 @@ print(opts, file=sys.stderr)
 
 assert opts.model_type in ['single', 'multi-res']
 
+FITNESS_EVAL_BATCHES = 10
+if opts.popn_size % FITNESS_EVAL_BATCHES != 0:
+    raise Exception("only support population size that's"
+                    " a multiple of %d" % FITNESS_EVAL_BATCHES)
+
 dataset = data.dataset(split=opts.split,
                        batch_size=opts.num_examples)
 for x, y_true in dataset:
@@ -69,18 +74,16 @@ def fitness(member):
 
 fitness = jit(vmap(fitness))
 
-if opts.model_type == 'single':
-    #  either all 0s or 1s
-    baseline = jnp.repeat(jnp.arange(1), (13)).reshape(2, 13)
-    print("baseline no / all channels fitness")
-    print(baseline)
-    print(fitness(baseline))
-else:  # 'multi-res':
-    # all 0s, 1s, ... 4s
-    baseline = jnp.repeat(jnp.arange(5), (13)).reshape(5, 13)
-    print("baseline x64, x32, x16, x8, x0 fitness")
-    print(baseline)
-    print(fitness(baseline))
+
+def eval_fitness_in_batches(members):
+    # have to manually do vectorisation here since entire lot
+    # vectorised with vmap will OOM o_O
+    fitnesses = []
+    members = members.reshape(FITNESS_EVAL_BATCHES,
+                              opts.popn_size // FITNESS_EVAL_BATCHES, 13)
+    for b in range(FITNESS_EVAL_BATCHES):
+        fitnesses.append(fitness(members[b]))
+    return jnp.concatenate(fitnesses)
 
 
 def new_member():
@@ -92,7 +95,7 @@ def new_member():
 
 ga = simple_ga.SimpleGA(popn_size=opts.popn_size,
                         new_member_fn=new_member,
-                        fitness_fn=fitness,
+                        fitness_fn=eval_fitness_in_batches,
                         cross_over_fn=simple_ga.np_array_crossover,
                         proportion_new_members=0.2,
                         proportion_elite=0.0)

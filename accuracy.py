@@ -25,6 +25,7 @@ print(opts, file=sys.stderr)
 
 assert opts.model_type in ['single', 'multi-res']
 
+channel_selection = None
 if opts.model_type == 'single':
     if opts.fixed_channel_selection is not None:
         raise Exception("--fixed-channel-selection"
@@ -56,14 +57,14 @@ def calc_logits_fn(x):
 if opts.channel_sweep:
     results = []
     for ch1 in range(0, 13):
-        for ch2 in range(ch1 + 1, 13):
-            dataset = data.dataset(split=opts.split, batch_size=32,
-                                   channels_to_zero_out=[ch1, ch2])
-            accuracy, mean_loss = u.accuracy_mean_loss(calc_logits_fn, dataset)
-            results.append((ch1, ch2, accuracy, mean_loss))
-    for ch1, ch2, accuracy, mean_loss in sorted(results, key=lambda v: v[-1]):
-        print("ch %02d %02d accuracy %0.3f mean_loss %0.3f" %
-              (ch1, ch2, accuracy, mean_loss))
+        # for ch2 in range(ch1 + 1, 13):
+        dataset = data.dataset(split=opts.split, batch_size=32,
+                               channels_to_zero_out=[ch1])
+        accuracy, mean_loss = u.accuracy_mean_loss(calc_logits_fn, dataset)
+        results.append((ch1, accuracy, mean_loss))
+    for ch1, accuracy, mean_loss in sorted(results, key=lambda v: v[-1]):
+        print("ch %02d accuracy %0.3f mean_loss %0.3f" %
+              (ch1, accuracy, mean_loss))
     exit()
 
 if opts.channel_mask is not None:
