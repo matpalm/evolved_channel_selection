@@ -6,6 +6,7 @@ import models
 import numpy as np
 from jax import jit
 import jax.numpy as jnp
+import json
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -74,5 +75,9 @@ else:
     dataset = data.dataset(split=opts.split, batch_size=32)
 
 accuracy, mean_loss = u.accuracy_mean_loss(calc_logits_fn, dataset)
-print("channel_selection %s accuracy %0.3f mean_loss %0.3f" %
-      (channel_selection, accuracy, mean_loss))
+
+stats = {"channel_selection": "%s" % channel_selection,
+         "accuracy": float(accuracy),
+         "mean_loss": float(mean_loss)}
+print(json.dumps(stats))
+sys.stdout.flush()
