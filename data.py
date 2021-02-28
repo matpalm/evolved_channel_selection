@@ -53,15 +53,14 @@ def _augment(x, y):
     return x, y
 
 
-def dataset(split, batch_size, channels_to_zero_out=None, input_size=64,
+def dataset(split, batch_size, channel_mask=None, input_size=64,
             dropout_key=None):
     """Generates pairs of x, y data.
 
     Args:
       split: which split to use
       batch_size: batch size to iterate with
-      channels_to_zero_out: which channels to always zero out. if None then
-        zero out no channels. supports a single int, or an array of ints
+      channel_mask: channel mask to apply to x; arrays of 0s & 1s
       input_size: spatial size to resize H, W to. 64 is a noop.
       dropout_key: key for dropout_channels; None => no dropout
 
@@ -69,12 +68,12 @@ def dataset(split, batch_size, channels_to_zero_out=None, input_size=64,
       yields (x, y) pairs in batch_size
 
     Raises:
-      Exception if both dropout_key and channels_to_zero_out set.
+      Exception if both dropout_key and channel_mask set.
     """
 
-    if (dropout_key is not None) and (channels_to_zero_out is not None):
-        raise Exception("dropout_key", dropout_key, "and channels_to_zero_out",
-                        channels_to_zero_out, "can't both be set")
+    if (dropout_key is not None) and (channel_mask is not None):
+        raise Exception("dropout_key", dropout_key, "and channel_mask",
+                        channel_mask, "can't both be set")
 
     is_training = split in ['sample', 'train']
 
@@ -100,21 +99,20 @@ def dataset(split, batch_size, channels_to_zero_out=None, input_size=64,
 
         x = clip_and_standardise(x)
 
-        # TODO: zeroing of channels was put here in the data pipeline when
+        # TODO: masking of channels was put here in the data pipeline when
         #   --model-type single was first written but these would make more
         #   sense to be done in the logits calc as it's done for
         #   --model-type multi-res
 
-        if channels_to_zero_out is not None:
-            indexes = jax.ops.index[:, :, channels_to_zero_out]
-            x = jax.ops.index_update(x, indexes, 0)
+        if channel_mask is not None:
+            x *= channel_mask
 
         if dropout_key is not None:
             # sample sequence of 13 0s and 1s
-            channel_mask = jax.random.randint(
+            random_channel_mask = jax.random.randint(
                 dropout_key, minval=0, maxval=2, shape=(13,))
             # tile that out to be a mask across the channels of x
-            mask = jnp.tile(channel_mask, (input_size, input_size, 1))
+            mask = jnp.tile(random_channel_mask, (input_size, input_size, 1))
             # apply that mask
             x *= mask
 
