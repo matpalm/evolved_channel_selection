@@ -35,6 +35,7 @@ for x, y_true in dataset:
 params = u.load_params(opts.params)
 
 
+@jit
 def inv_mean_loss(member):
     if opts.model_type == 'single':
         # member denotes a channel mask we want to apply to
@@ -52,20 +53,34 @@ def inv_mean_loss(member):
     return 1.0 / mean_loss
 
 
-inv_mean_loss = jit(vmap(inv_mean_loss))
+@jit
+def channel_penalty(member):
+    penalty = jnp.sum(jnp.equal(member, 0)) * 0.8   # x64
+    penalty += jnp.sum(jnp.equal(member, 1)) * 0.4  # x32
+    penalty += jnp.sum(jnp.equal(member, 2)) * 0.2  # x16
+    penalty += jnp.sum(jnp.equal(member, 3)) * 0.1  # x8
+    # channel 4, x0, is free to use
+    return penalty
+
+
+def fitness(member):
+    return inv_mean_loss(member) - channel_penalty(member)
+
+
+fitness = jit(vmap(fitness))
 
 if opts.model_type == 'single':
     #  either all 0s or 1s
     baseline = jnp.repeat(jnp.arange(1), (13)).reshape(2, 13)
     print("baseline no / all channels fitness")
     print(baseline)
-    print(inv_mean_loss(baseline))
+    print(fitness(baseline))
 else:  # 'multi-res':
     # all 0s, 1s, ... 4s
     baseline = jnp.repeat(jnp.arange(5), (13)).reshape(5, 13)
     print("baseline x64, x32, x16, x8, x0 fitness")
     print(baseline)
-    print(inv_mean_loss(baseline))
+    print(fitness(baseline))
 
 
 def new_member():
@@ -77,18 +92,20 @@ def new_member():
 
 ga = simple_ga.SimpleGA(popn_size=opts.popn_size,
                         new_member_fn=new_member,
-                        fitness_fn=inv_mean_loss,
+                        fitness_fn=fitness,
                         cross_over_fn=simple_ga.np_array_crossover,
                         proportion_new_members=0.2,
                         proportion_elite=0.0)
 
 for _ in range(opts.num_epochs):
-    print("ga.members", ga.members)
+    #print("ga.members", ga.members)
     ga.calc_fitnesses()
     print("fitness", ga.raw_fitness_values)
     print("selection", ga.selection_array)
     print("popn mean fitness", np.mean(ga.raw_fitness_values))
-    print("elite", ga.get_elite_member())
+    e = ga.get_elite_member()
+    print("elite %s inv_mean_loss %f channel_penalty %f" %
+          (e, inv_mean_loss(e), channel_penalty(e)))
     ga.breed_next_gen()
 
 ga.calc_fitnesses()

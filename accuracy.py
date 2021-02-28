@@ -74,4 +74,5 @@ else:
     dataset = data.dataset(split=opts.split, batch_size=32)
 
 accuracy, mean_loss = u.accuracy_mean_loss(calc_logits_fn, dataset)
-print("accuracy %0.3f mean_loss %0.3f" % (accuracy, mean_loss))
+print("channel_selection %s accuracy %0.3f mean_loss %0.3f" %
+      (channel_selection, accuracy, mean_loss))

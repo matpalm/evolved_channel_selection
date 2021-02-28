@@ -111,6 +111,7 @@ def train(opts):
             if opts.model_type == 'single':
                 return model.apply(params, x)
             else:  # multi-res
+                # TODO: this favours validation stop based only on x64.
                 just_select_x64 = jnp.array([0] * 13)
                 return model.apply(params, x, just_select_x64)
 
