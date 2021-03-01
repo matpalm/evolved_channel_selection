@@ -30,6 +30,13 @@ def construct_single_trunk_model():
     return hk.without_apply_rng(hk.transform(_single_trunk_model))
 
 
+def downsample(x, factor):
+    return hk.max_pool(x,
+                       window_shape=(1, factor, factor, 1),
+                       strides=(1, factor, factor, 1),
+                       padding='VALID')
+
+
 def _multires_model(x64, channel_selection):
     """Builds multiresolution shared trunk model.
 
@@ -46,13 +53,9 @@ def _multires_model(x64, channel_selection):
     # make three downscaled variants of the input; down to a HW of 32, 16
     # and 8. note: we don't bother with the zero case (channel_selection=4)
     # since it's implied by being masked out in all resolutions.
-    @partial(vmap, in_axes=(0, None))
-    def downsample(x, hw):
-        return jax.image.resize(x, shape=(hw, hw, 13),
-                                method='linear', antialias=True)
-    x32 = downsample(x64, 32)  # (B, 32, 32, 13)
-    x16 = downsample(x64, 16)  # (B, 16, 16, 13)
-    x8 = downsample(x64, 8)    # (B, 8, 8, 13)
+    x32 = downsample(x64, 2)  # (B, 32, 32, 13)
+    x16 = downsample(x64, 4)  # (B, 16, 16, 13)
+    x8 = downsample(x64, 8)   # (B, 8, 8, 13)
 
     # mask out different channels for the different resolutions depending
     # on channel_selection. each channel will be represented by either the
