@@ -55,7 +55,6 @@ def calc_logits_fn(x):
 
 
 if opts.channel_sweep:
-    results = []
     for ch1 in range(0, 13):
         channel_mask = np.ones(13)
         channel_mask[ch1] = 0.0
@@ -63,8 +62,6 @@ if opts.channel_sweep:
         dataset = data.dataset(split=opts.split, batch_size=32,
                                channel_mask=channel_mask)
         accuracy, mean_loss = u.accuracy_mean_loss(calc_logits_fn, dataset)
-        results.append((ch1, accuracy, mean_loss))
-    for ch1, accuracy, mean_loss in sorted(results, key=lambda v: v[-1]):
         print("ch %02d accuracy %0.3f mean_loss %0.3f" %
               (ch1, accuracy, mean_loss))
     exit()
@@ -78,7 +75,7 @@ else:
 
 accuracy, mean_loss = u.accuracy_mean_loss(calc_logits_fn, dataset)
 
-stats = {"channel_selection": "%s" % channel_selection,
+stats = {"channel_selection": str(list(channel_selection)),
          "accuracy": float(accuracy),
          "mean_loss": float(mean_loss)}
 print(json.dumps(stats))
